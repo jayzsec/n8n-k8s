@@ -1,0 +1,162 @@
+---
+- name: Deploy n8n Stack on Kubernetes
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  # --- Configuration Variables ---
+  # You can change these values as needed
+  vars:
+    postgres_password: "postgres"
+    n8n_database: "n8n"
+    ingress_namespace: "ingress-nginx"
+    n8n_hostname: "n8n.example.com"
+    k8s_manifests_dir: "./k8s_manifests" # <-- IMPORTANT: Put your .yaml files here
+    monitoring_manifests_dir: "./monitoring-stack"
+
+  # --- Playbook Tasks ---
+  tasks:
+    - name: "--- 📦 Adding Helm repositories... ---"
+      community.kubernetes.helm_repository:
+        name: "{{ item.name }}"
+        repo_url: "{{ item.url }}"
+        state: present
+      loop:
+        - { name: 'bitnami', url: 'https://charts.bitnami.com/bitnami' }
+        - { name: 'ingress-nginx', url: 'https://kubernetes.github.io/ingress-nginx' }
+
+    - name: "--- 🐘 Installing PostgreSQL via Helm... ---"
+      community.kubernetes.helm:
+        name: postgres
+        chart_ref: bitnami/postgresql
+        release_namespace: default
+        state: present
+        values:
+          auth:
+            postgresPassword: "{{ postgres_password }}"
+            database: "{{ n8n_database }}"
+
+    - name: "--- 🌐 Installing NGINX Ingress Controller via Helm... ---"
+      community.kubernetes.helm:
+        name: ingress-nginx
+        chart_ref: ingress-nginx/ingress-nginx
+        release_namespace: "{{ ingress_namespace }}"
+        create_namespace: yes
+        state: present
+
+    - name: "--- ⏳ Waiting for PostgreSQL to become ready... ---"
+      kubernetes.core.k8s_wait:
+        kind: Pod
+        label_selectors:
+          - "app.kubernetes.io/name=postgresql"
+        namespace: default
+        timeout_seconds: 300
+        condition:
+          type: Ready
+          status: "True"
+
+    - name: "--- ⏳ Waiting for NGINX Ingress Controller to become ready... ---"
+      kubernetes.core.k8s_wait:
+        kind: Pod
+        label_selectors:
+          - "app.kubernetes.io/component=controller"
+        namespace: "{{ ingress_namespace }}"
+        timeout_seconds: 300
+        condition:
+          type: Ready
+          status: "True"
+      # This wait is crucial and directly addresses the error you were seeing.
+
+    - name: "--- 📄 Check for local k8s_manifests directory... ---"
+      stat:
+        path: "{{ k8s_manifests_dir }}"
+      register: k8s_dir
+
+    - name: "--- 📄 Applying all local Kubernetes YAML files... ---"
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ item }}"
+      with_fileglob:
+        - "{{ k8s_manifests_dir }}/*.yaml"
+        - "{{ k8s_manifests_dir }}/*.yml"
+      loop_control:
+        loop_var: item
+      when: k8s_dir.stat.isdir is defined and k8s_dir.stat.isdir
+
+    - name: "--- 📄 Check for 'monitoring-stack' directory... ---"
+      stat:
+        path: "{{ monitoring_manifests_dir }}"
+      register: monitoring_dir
+
+    - name: "--- 📄 Applying monitoring-stack YAML files... ---"
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ item }}"
+      with_fileglob:
+        - "{{ monitoring_manifests_dir }}/*.yaml"
+        - "{{ monitoring_manifests_dir }}/*.yml"
+      loop_control:
+        loop_var: item
+      when: monitoring_dir.stat.isdir is defined and monitoring_dir.stat.isdir
+
+    - name: "--- ⚠ Warning if 'monitoring-stack' directory not found ---"
+      debug:
+        msg: "Warning: '{{ monitoring_manifests_dir }}' directory not found. Skipping."
+      when: monitoring_dir.stat.isdir is not defined or not monitoring_dir.stat.isdir
+
+    - name: "--- 🔐 Generating a private key for TLS... ---"
+      community.crypto.openssl_privatekey:
+        path: /tmp/tls.key
+        type: RSA
+        size: 2048
+
+    - name: "--- 🔐 Generating OpenSSL CSR... ---"
+      community.crypto.openssl_csr:
+        path: /tmp/tls.csr
+        privatekey_path: /tmp/tls.key
+        common_name: "{{ n8n_hostname }}"
+        subject_alt_name:
+          - "DNS:{{ n8n_hostname }}"
+
+    - name: "--- 🔐 Generating self-signed certificate... ---"
+      community.crypto.openssl_certificate:
+        path: /tmp/tls.crt
+        privatekey_path: /tmp/tls.key
+        csr_path: /tmp/tls.csr
+        provider: selfsigned
+
+    - name: "--- 🔑 Creating 'tls-secret' in Kubernetes... ---"
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: tls-secret
+            namespace: default
+          type: kubernetes.io/tls
+          data:
+            tls.crt: "{{ lookup('file', '/tmp/tls.crt') | b64encode }}"
+            tls.key: "{{ lookup('file', '/tmp/tls.key') | b64encode }}"
+
+    - name: "--- 🧹 Cleaning up temporary certificate files... ---"
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - /tmp/tls.key
+        - /tmp/tls.csr
+        - /tmp/tls.crt
+
+    - name: "--- 🎉 Display final instructions ---"
+      debug:
+        msg:
+          - "--- 🎉 All done! Setup is complete. ---"
+          - "The final step is to create a network bridge to the Ingress Controller."
+          - "Open a NEW, SEPARATE terminal window and run the following command."
+          - "We are using port 8443 because ports below 1024 require admin permissions."
+          - ""
+          - "kubectl port-forward -n {{ ingress_namespace }} service/ingress-nginx-controller 8443:443"
+          - ""
+          - "Then, in another terminal or your browser, you can finally access n8n at:"
+          - "https://{{ n8n_hostname }}:8443"
