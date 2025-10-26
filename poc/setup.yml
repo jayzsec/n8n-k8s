@@ -11,13 +11,13 @@
     n8n_database: "n8n"
     ingress_namespace: "ingress-nginx"
     n8n_hostname: "n8n.example.com"
-    k8s_manifests_dir: "./k8s_manifests" # <-- IMPORTANT: Put your .yaml files here
+    k8s_manifests_dir: "./k8s_manifests"
     monitoring_manifests_dir: "./monitoring-stack"
 
   # --- Playbook Tasks ---
   tasks:
     - name: "--- 📦 Adding Helm repositories... ---"
-      community.kubernetes.helm_repository:
+      kubernetes.core.helm_repository:
         name: "{{ item.name }}"
         repo_url: "{{ item.url }}"
         state: present
@@ -26,7 +26,7 @@
         - { name: 'ingress-nginx', url: 'https://kubernetes.github.io/ingress-nginx' }
 
     - name: "--- 🐘 Installing PostgreSQL via Helm... ---"
-      community.kubernetes.helm:
+      kubernetes.core.helm:
         name: postgres
         chart_ref: bitnami/postgresql
         release_namespace: default
@@ -37,7 +37,7 @@
             database: "{{ n8n_database }}"
 
     - name: "--- 🌐 Installing NGINX Ingress Controller via Helm... ---"
-      community.kubernetes.helm:
+      kubernetes.core.helm:
         name: ingress-nginx
         chart_ref: ingress-nginx/ingress-nginx
         release_namespace: "{{ ingress_namespace }}"
@@ -45,27 +45,26 @@
         state: present
 
     - name: "--- ⏳ Waiting for PostgreSQL to become ready... ---"
-      kubernetes.core.k8s_wait:
+      kubernetes.core.k8s_info:
         kind: Pod
         label_selectors:
           - "app.kubernetes.io/name=postgresql"
         namespace: default
-        timeout_seconds: 300
-        condition:
-          type: Ready
-          status: "True"
+      register: postgres_pod_status
+      until: "postgres_pod_status.resources | length > 0 and postgres_pod_status.resources[0].status.phase == 'Running'"
+      retries: 60  # 60 retries * 5 seconds delay = 300 seconds
+      delay: 5     # Wait 5 seconds between retries
 
     - name: "--- ⏳ Waiting for NGINX Ingress Controller to become ready... ---"
-      kubernetes.core.k8s_wait:
+      kubernetes.core.k8s_info:
         kind: Pod
         label_selectors:
           - "app.kubernetes.io/component=controller"
         namespace: "{{ ingress_namespace }}"
-        timeout_seconds: 300
-        condition:
-          type: Ready
-          status: "True"
-      # This wait is crucial and directly addresses the error you were seeing.
+      register: ingress_pod_status
+      until: "ingress_pod_status.resources | length > 0 and ingress_pod_status.resources[0].status.phase == 'Running'"
+      retries: 60  # 60 retries * 5 seconds delay = 300 seconds
+      delay: 5     # Wait 5 seconds between retries
 
     - name: "--- 📄 Check for local k8s_manifests directory... ---"
       stat:
@@ -76,6 +75,7 @@
       kubernetes.core.k8s:
         state: present
         src: "{{ item }}"
+        namespace: default
       with_fileglob:
         - "{{ k8s_manifests_dir }}/*.yaml"
         - "{{ k8s_manifests_dir }}/*.yml"
@@ -92,6 +92,7 @@
       kubernetes.core.k8s:
         state: present
         src: "{{ item }}"
+        namespace: default
       with_fileglob:
         - "{{ monitoring_manifests_dir }}/*.yaml"
         - "{{ monitoring_manifests_dir }}/*.yml"
@@ -119,7 +120,7 @@
           - "DNS:{{ n8n_hostname }}"
 
     - name: "--- 🔐 Generating self-signed certificate... ---"
-      community.crypto.openssl_certificate:
+      community.crypto.x509_certificate:
         path: /tmp/tls.crt
         privatekey_path: /tmp/tls.key
         csr_path: /tmp/tls.csr
