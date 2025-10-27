@@ -13,6 +13,7 @@ spec:
         # --- STAGING CHANGE: Point to your private container registry ---
         # Replace 'your-private-registry.io' with your actual registry
         image: ghcr.io/jayzsec/n8n:1.112.2-staging
+        imagePullPolicy: Always
 
         # --- STAGING CHANGE: Increase resources for staging environment ---
         resources:
