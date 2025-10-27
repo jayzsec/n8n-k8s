@@ -4,7 +4,7 @@ kind: Kustomization
 # List all the resource files in the 'base' directory
 resources:
   - n8n-deployment.yaml
-  - n8n-service.yml
+  - n8n-svc.yml
   - redis-deployment.yaml
   - redis-service.yaml
   - logging-deployment.yaml

@@ -15,7 +15,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: n8n
+            name: n8n-svc
             port:
               number: 5678
   tls:

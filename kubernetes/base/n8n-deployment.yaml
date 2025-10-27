@@ -16,8 +16,8 @@ spec:
       - name: n8n
         image: n8nio/n8n:latest
         env:
-        - name: N8N_PORT
-          value: "5678"
+        #- name: N8N_PORT
+        #  value: "5678"
         - name: DB_TYPE
           value: postgresdb
         - name: DB_POSTGRESDB_HOST
