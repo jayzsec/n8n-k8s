@@ -54,8 +54,8 @@ kubectl wait --for=condition=ready certificate/n8n-tls \
 echo "--- ✅ TLS Secret is ready! ---"
 
 # Clean up temporary files
-echo "--- 🧹 Cleaning up temporary certificate files... ---"
-rm req.conf tls.key tls.crt
+#echo "--- 🧹 Cleaning up temporary certificate files... ---"
+#rm req.conf tls.key tls.crt
 
 echo ""
 echo "--- 🎉 All done! ---"

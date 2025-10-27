@@ -2,16 +2,18 @@
 
 This project deploys a scalable, self-hosted n8n instance onto a local Kubernetes cluster (such as one provided by Podman) configured for a staging environment.
 
-It uses **Kustomize** to manage environment-specific configurations, **Helm** to deploy dependencies (PostgreSQL, NGINX), and a private GitHub Container Registry (`ghcr.io`) to host the n8n application image.
+It uses **Kustomize** to manage environment-specific configurations, **Helm** to deploy dependencies, **`cert-manager`** for automated TLS, and a private GitHub Container Registry (`ghcr.io`) for the application image.
 
 ## Architecture
 
 This setup provisions the following components:
 
   * **n8n Deployment**: The main n8n application, configured to run in "queue" mode.
-  * **PostgreSQL Database**: Deployed via the Bitnami Helm chart, used as the persistent database for n8n workflows and data.
-  * **Redis**: Deployed as a simple pod and service, used for n8n's queue management.
-  * **NGINX Ingress Controller**: Deployed via Helm, this acts as the reverse proxy, handling SSL termination and routing traffic from a hostname (`n8n.example.com`) to the internal `n8n` service.
+  * **PostgreSQL Database**: Deployed via the Bitnami Helm chart. Secrets are managed securely via a git-ignored `helm-values.yaml` file.
+  * **Redis**: Deployed as a `StatefulSet` to provide a stable network identity and persistent storage, making it resilient to restarts.
+  * **NGINX Ingress Controller**: Deployed via Helm, this acts as the reverse proxy.
+  * **`cert-manager`**: Automatically provisions a self-signed TLS certificate and creates the `tls-secret` required by the Ingress.
+  * **Kustomize Overlays**: Manages the configuration differences between the `base` setup and the `staging` environment, including resource quotas and image tags.
 
 ## 📋 Prerequisites
 
@@ -23,7 +25,7 @@ Before you begin, ensure you have the following tools installed on your system (
 
 ## 🚀 Setup Instructions
 
-Follow these steps to build the private container image and deploy the full stack to your `n8n-staging` namespace.
+Follow these steps to build the private container image and deploy the full stack.
 
 ### Step 1: Build and Push Your Private n8n Image
 
@@ -42,46 +44,66 @@ Follow these steps to build the private container image and deploy the full stac
     ```
 
 3.  **Pull, Tag, and Push the n8n Image**:
-    This downloads the official n8n image and re-uploads it to your private registry.
 
     ```bash
     # 1. Pull an official version
     podman pull n8nio/n8n:latest
 
     # 2. Tag it for your registry
-    podman tag n8nio/n8n:latest ghcr.io/jayzsec/n8n:1.2.0-staging
+    podman tag n8nio/n8n:latest ghcr.io/jayzsec/n8n:1.112.2-staging
 
     # 3. Push it to your private registry
-    podman push ghcr.io/jayzsec/n8n:1.2.0-staging
+    podman push ghcr.io/jayzsec/n8n:1.112.2-staging
     ```
 
-### Step 2: One-Time Kubernetes Setup
+### Step 2: One-Time Cluster Setup
 
-1.  **Create the Staging Namespace**:
+1.  **Install `cert-manager`**:
+    This only needs to be done once per cluster. It will manage all your TLS certificates.
 
     ```bash
-    kubectl apply -f kubernetes/overlays/staging/namespace.yaml
+    helm repo add jetstack https://charts.jetstack.io
+    helm repo update
+    helm install cert-manager jetstack/cert-manager \
+      --namespace cert-manager \
+      --create-namespace \
+      --set installCRDs=true
     ```
 
-2.  **Create the Image Pull Secret**:
-    This command tells Kubernetes how to log in to `ghcr.io` to pull your private image.
+2.  **Create Helm Secrets File**:
+    This file holds your database password and is ignored by Git.
 
     ```bash
-    kubectl create secret docker-registry ghcr-creds \
-      --docker-server=ghcr.io \
-      --docker-username=jayzsec \
-      --docker-password=YOUR_GITHUB_PAT_HERE \
-      --namespace=n8n-staging
+    # Create the .gitignore file to protect your secrets
+    echo "helm-values.yaml" > kubernetes/.gitignore
+
+    # Create the values file with your secure password
+    cat > kubernetes/helm-values.yaml <<EOF
+    auth:
+      postgresPassword: "YourSecurePasswordGoesHere"
+    EOF
     ```
 
-### Step 3: Run the Deployment Script
+    *(Remember to replace the password with a strong one)*
 
-This script installs all Helm charts and applies all your Kustomize configurations for the `n8n-staging` environment.
+### Step 3: Run the Bootstrap Script
 
-```bash
-chmod +x kubernetes/reset_and_deploy.sh
-./kubernetes/reset_and_deploy.sh
-```
+This is the main script to deploy or redeploy your application. It handles creating the namespace, the image pull secret, and running the main deployment script.
+
+1.  **Make scripts executable**:
+
+    ```bash
+    chmod +x kubernetes/bootstrap.sh
+    chmod +x kubernetes/ghcr-creds.sh
+    chmod +x kubernetes/reset_and_deploy.sh
+    ```
+
+2.  **Run the bootstrap script**:
+    This script will securely prompt you for your GitHub PAT.
+
+    ```bash
+    ./kubernetes/bootstrap.sh
+    ```
 
 ### Step 4: Configure Hostname Resolution
 
@@ -114,40 +136,44 @@ You can now access your n8n instance in a web browser at:
 
 **[https://n8n.example.com:8443](https://n8n.example.com:8443)**
 
-You will see a browser privacy warning (e.g., "Your connection is not private"). This is **expected and normal** because the setup script generated a *self-signed* TLS certificate.
+You will see a browser privacy warning (e.g., "Your connection is not private"). This is **expected and normal** because `cert-manager` generated a *self-signed* certificate for local development.
 
 Click **"Advanced"** and then **"Proceed to n8n.example.com (unsafe)"** to continue.
 
 -----
 
+## 🔁 Redeploying with an Updated Image
+
+If you push a new version of your image (e.g., `ghcr.io/jayzsec/n8n:1.112.3-staging`):
+
+1.  Update the `image:` tag in `kubernetes/overlays/staging/deployment-patch.yaml`.
+2.  Force a rolling restart to pick up the change. The `imagePullPolicy: Always` will ensure the new image is pulled.
+    ```bash
+    kubectl rollout restart deployment n8n -n n8n-staging
+    ```
+
+-----
+
 ## 🐛 Troubleshooting Guide
 
-A quick reference for the issues faced during this setup.
+  * **Error:** `ImagePullBackOff` or Pod stuck in `ContainerCreating`.
 
-  * **Error:** `404 Not Found`
-
-      * **Cause:** The NGINX Ingress Controller is working, but the `Ingress` resource (the "rule" to connect `n8n.example.com` to your service) was not created or applied.
-      * **Fix:** Create and apply the `n8n-ingress.yaml` file.
-
-  * **Error:** `CreateContainerConfigError` with message `secret "postgres-postgresql" not found`
-
-      * **Cause:** The `n8n` pod (in the `n8n-staging` namespace) could not find the database secret. This is because Helm installed PostgreSQL in the `default` namespace.
-      * **Fix:** Modify the `helm install postgres ...` command in `reset_and_deploy.sh` to include the `--namespace n8n-staging` flag.
-
-  * **Error:** `error: no matching resources found` during `kubectl wait ...`
-
-      * **Cause:** The `kubectl wait` command was looking for the PostgreSQL pod in the `default` namespace, but Helm correctly installed it in `n8n-staging`.
-      * **Fix:** Modify the `kubectl wait ...` command in `reset_and_deploy.sh` to include the `--namespace n8n-staging` flag.
+      * **Cause:** The `ghcr-creds` secret is missing, expired, or incorrect. Kubernetes cannot pull your private image.
+      * **Fix:** Re-run the credential script: `./kubernetes/ghcr-creds.sh`. It will securely prompt you for a valid GitHub PAT and recreate the secret.
 
   * **Error:** `503 Service Temporarily Unavailable`
 
-      * **Cause:** NGINX is working, but the `n8n` pod is unhealthy and failing its health checks. This was traced to the application crashing on startup.
+      * **Cause:** NGINX is working, but the `n8n` pod is unhealthy. This was traced to the application crashing on startup.
       * **Log Message:** `RangeError: options.port should be >= 0 and < 65536. Received type number (NaN).`
-      * **Root Cause:** A Kubernetes feature auto-injects an environment variable for the `n8n` service called `N8N_PORT`. The `n8n` app reads this variable, but its value is a URL (`tcp://...`) and not a port number, causing a crash.
-      * **Fix:** Explicitly set the port in `kubernetes/base/n8n-deployment.yaml` to override the bad value:
-        ```yaml
-        env:
-        - name: N8N_PORT
-          value: "5678"
-        # ... other env vars ...
-        ```
+      * **Root Cause:** A Kubernetes feature auto-injects an env var for the `n8n` service called `N8N_PORT`. The `n8n` app reads this, but its value is a URL (`tcp://...`) and not a port, causing a crash.
+      * **Fix:** We fixed this by renaming the service in `kubernetes/base/n8n-svc.yml` to **`n8n-svc`**. This prevents the name collision, which is the clean, long-term solution. The Ingress was updated to point to `n8n-svc`.
+
+  * **Error:** `CreateContainerConfigError` with message `secret "postgres-postgresql" not found`
+
+      * **Cause:** The `n8n` pod (in `n8n-staging`) could not find the database secret. This is because Helm installed PostgreSQL in the `default` namespace.
+      * **Fix:** The `helm install postgres ...` command in `reset_and_deploy.sh` was updated with the `--namespace n8n-staging` flag.
+
+  * **Error:** Ingress is missing a certificate (`tls-secret` not found).
+
+      * **Cause:** `cert-manager` may have failed to create the certificate.
+      * **Fix:** Check the certificate status: `kubectl describe certificate n8n-tls -n n8n-staging`. If there is an error, check the `cert-manager` pod logs: `kubectl logs -n cert-manager deploy/cert-manager`.
