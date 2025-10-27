@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: n8n # This name must match the deployment in the 'base'
+spec:
+  template:
+    spec:
+      # Tells the pods in this deployment to use this secret for pulling images
+      imagePullSecrets:
+      - name: ghcr-creds
+      containers:
+      - name: n8n # This name must match the container in the 'base'
+        # --- STAGING CHANGE: Point to your private container registry ---
+        # Replace 'your-private-registry.io' with your actual registry
+        image: ghcr.io/jayzsec/n8n:1.112.2-staging
+
+        # --- STAGING CHANGE: Increase resources for staging environment ---
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"

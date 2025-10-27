@@ -2,3 +2,8 @@
 notes.md
 
 .DS_Store
+/kubernetes/ghcr-creds.sh
+
+/k8-stage
+/terraform
+/workflows

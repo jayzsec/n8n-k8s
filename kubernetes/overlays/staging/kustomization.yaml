@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Point to the base configuration
+
+# Apply all resources to this namespace
+namespace: n8n-staging
+
+# List the files specific to this staging overlay
+resources:
+- namespace.yaml
+- resource-quota.yaml
+- ../../base
+
+# Apply the patch to the n8n deployment
+patches:
+- path: deployment-patch.yaml
