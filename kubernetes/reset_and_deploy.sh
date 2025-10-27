@@ -16,8 +16,11 @@ helm repo update
 
 # 2. Install PostgreSQL using Helm
 echo "--- 🐘 Installing PostgreSQL via Helm... ---"
-# Added --namespace n8n-staging
-helm install postgres bitnami/postgresql --set auth.postgresPassword=postgres --set auth.database=n8n --namespace n8n-staging
+# Use the -f flag to provide secrets from the ignored values file
+helm install postgres bitnami/postgresql \
+  -f helm-values.yaml \
+  --set auth.database=n8n \
+  --namespace n8n-staging
 
 # 3. Install the NGINX Ingress Controller using Helm
 echo "--- 🌐 Installing NGINX Ingress Controller via Helm... ---"

@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# You can use this or  the prompt version
+#kubectl create secret docker-registry ghcr-creds \
+#  --docker-server=ghcr.io \
+#  --docker-username=jayzsec \
+#  --docker-password=your-pat-here \
+#  --namespace=n8n-staging
+
+# This script securely prompts for your GitHub Personal Access Token (PAT)
+# and creates the image pull secret in the n8n-staging namespace.
+# Prompt for the PAT, -s hides the input
+echo -n "Enter your GitHub PAT (ghp_...): "
+read -s GITHUB_PAT
+echo
+
+if [ -z "$GITHUB_PAT" ]; then
+    echo "Error: No PAT provided."
+    exit 1
+fi
+
+kubectl create secret docker-registry ghcr-creds \
+  --docker-server=ghcr.io \
+  --docker-username=jayzsec \
+  --docker-password="$GITHUB_PAT" \
+  --namespace=n8n-staging \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+echo "✅ Secret ghcr-creds created/updated in n8n-staging namespace."

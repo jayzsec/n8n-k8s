@@ -7,3 +7,6 @@ notes.md
 /k8-stage
 /terraform
 /workflows
+
+# Helm values files contain secrets
+kubernetes/helm-values.yaml
