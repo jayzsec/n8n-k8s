@@ -5,7 +5,7 @@ kind: Kustomization
 resources:
   - n8n-deployment.yaml
   - n8n-svc.yml
-  - redis-deployment.yaml
+  - redis-statefulset.yaml
   - redis-service.yaml
   - logging-deployment.yaml
   - logging-service.yaml
