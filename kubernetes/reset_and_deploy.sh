@@ -42,35 +42,16 @@ echo "--- 📄 Applying Kubernetes configuration for the 'staging' environment..
 kubectl apply -k overlays/staging
 
 # 6. Generate the TLS certificate and create the secret
-echo "--- 🔐 Generating a new TLS certificate and creating the 'tls-secret'... ---"
-cat > req.conf <<EOF
-[req]
-distinguished_name = req_distinguished_name
-x509_extensions = v3_req
-prompt = no
-[req_distinguished_name]
-CN = n8n.example.com
-[v3_req]
-keyUsage = keyEncipherment, dataEncipherment
-extendedKeyUsage = serverAuth
-subjectAltName = @alt_names
-[alt_names]
-DNS.1 = n8n.example.com
-EOF
+echo "--- 🔐 Letting cert-manager create the 'tls-secret'... ---"
+# All the old openssl and kubectl create secret commands are removed.
+# Kustomize has already applied the 'Certificate' resource.
+# We just need to wait for the secret to be ready.
 
-# ... (openssl commands) ...
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout tls.key -out tls.crt \
-  -config req.conf
-
-# IMPORTANT: When you create the secret, specify the namespace!
-echo "--- 🔐 Generating TLS certificate for staging namespace... ---"
-kubectl create secret tls tls-secret --key tls.key --cert tls.crt \
+kubectl wait --for=condition=ready certificate/n8n-tls \
   --namespace n8n-staging \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --timeout=120s
 
-# Create or replace the Kubernetes secret
-# kubectl create secret tls tls-secret --key tls.key --cert tls.crt --dry-run=client -o yaml | kubectl apply -f -
+echo "--- ✅ TLS Secret is ready! ---"
 
 # Clean up temporary files
 echo "--- 🧹 Cleaning up temporary certificate files... ---"

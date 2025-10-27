@@ -10,3 +10,4 @@ resources:
   - logging-deployment.yaml
   - logging-service.yaml
   - ingress.yaml
+  - certificate.yaml

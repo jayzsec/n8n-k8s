@@ -1,0 +1,23 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: n8n-tls
+spec:
+  # This is the secret your Ingress is already looking for!
+  secretName: tls-secret
+  duration: 2160h # 90d
+  renewBefore: 360h # 15d
+  commonName: n8n.example.com
+  dnsNames:
+  - n8n.example.com
+  # This is a self-signed issuer, perfect for local dev
+  issuerRef:
+    name: selfsigned-issuer
+---
+# This is the self-signed issuer for our local setup
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
