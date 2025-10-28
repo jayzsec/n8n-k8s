@@ -1,12 +1,22 @@
 # local notes
 notes.md
 
+# MacOS
 .DS_Store
-/kubernetes/ghcr-creds.sh
 
-/k8-stage
-/terraform
-/workflows
+# Sensitive
+/kubernetes/ghcr-creds.sh
 
 # Helm values files contain secrets
 kubernetes/helm-values.yaml
+
+# On development
+/terraform
+/workflows
+kubernetes/monitoring-stack/
+architecture.png
+install.sh
+TODO.md
+
+# Alternative README
+README.md.bak
